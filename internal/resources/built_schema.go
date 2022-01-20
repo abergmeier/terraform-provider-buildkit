@@ -1,31 +1,52 @@
 package resources
 
 import (
-	"fmt"
-
+	"github.com/abergmeier/terraform-provider-buildkit/pkg/buildctl/build"
 	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/moby/buildkit/cmd/buildctl/build"
 )
+
+func outputResource() *schema.Resource {
+	return &schema.Resource{
+		Schema: map[string]*schema.Schema{
+			"type": {
+				Type:     schema.TypeString,
+				Required: true,
+			},
+			"name": {
+				Type:     schema.TypeString,
+				Optional: true,
+			},
+			"dest": {
+				Type:     schema.TypeString,
+				Optional: true,
+			},
+			"push": {
+				Type:     schema.TypeBool,
+				Optional: true,
+			},
+		},
+	}
+}
 
 func BuiltResource() *schema.Resource {
 	return &schema.Resource{
 		Schema: map[string]*schema.Schema{
 			"addr": {
 				Type:     schema.TypeString,
-				Required: true,
+				Optional: true,
 			},
 			"output": {
+				Type: schema.TypeSet,
+				Elem: outputResource(),
 				Description: `Define exports for build result, e.g.
 {
-	type = image
-	name=docker.io/username/image
-	push=false`,
-				Type: schema.TypeList,
-				Elem: &schema.Schema{
-					Type: schema.TypeMap,
-				},
+	type="image"
+	name="docker.io/username/image"
+	push=false
+}`,
+				MinItems:         1,
 				Required:         true,
 				ValidateDiagFunc: validateOutput,
 			},
@@ -40,11 +61,13 @@ source-image and destination-image are interpreted completely independently; e.g
 	}
 }
 
-func validateOutput(v interface{}, p cty.Path) diag.Diagnostics {
-	vs := v.([]interface{})
-	for _, vi := range vs {
-		vm := vi.(map[string]interface{})
-		_, err := build.ParseOutput([]string{fmt.Sprintf("type=%s,name=%s,push=%s", vm["type"].(string), vm["name"].(string), vm["push"].(bool))})
+func validateOutput(output interface{}, p cty.Path) diag.Diagnostics {
+	outputs := output.([]interface{})
+	for _, outputi := range outputs {
+		o := outputi.(*schema.ResourceData)
+		t := o.Get("type").(string)
+		d := o.Get("dest").(string)
+		_, _, err := build.ResolveExporterDest(t, d)
 		if err != nil {
 			return diag.FromErr(err)
 		}

@@ -5,33 +5,33 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/abergmeier/terraform-provider-buildkit/pkg/buildctl/build"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
-	"github.com/moby/buildkit/cmd/buildctl/build"
 	"github.com/moby/buildkit/util/progress/progresswriter"
 )
 
 func createBuilt(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	ois := d.Get("output").([]interface{})
+
+	outputs := d.Get("output").([]interface{})
+
+	exports := make([]client.ExportEntry, len(outputs))
+
+	err := error(nil)
+	for i, outputi := range outputs {
+		exports[i].Attrs = map[string]string{}
+		o := outputi.(*schema.ResourceData)
+		exports[i].Type = o.Get("type").(string)
+		d := o.Get("dest").(string)
+		exports[i].Output, exports[i].OutputDir, err = build.ResolveExporterDest(exports[i].Type, d)
+		if err != nil {
+			return diag.FromErr(err)
+		}
+	}
 
 	addr := d.Get("addr").(string)
-
-	outputMaps := make([]map[string]interface{}, len(ois))
-	for i, oi := range ois {
-		outputMaps[i] = oi.(map[string]interface{})
-	}
-
-	outputStrings := make([]string, len(ois))
-	for i, om := range outputMaps {
-		outputStrings[i] = fmt.Sprintf("type=%s,name=%s,push=%s", om["type"].(string), om["name"].(string), om["push"].(bool))
-	}
-
-	exports, err := build.ParseOutput(outputStrings)
-	if err != nil {
-		return diag.FromErr(err)
-	}
 
 	return createBuiltWithSolveOpt(ctx, client.SolveOpt{
 		Exports: exports,
@@ -67,6 +67,6 @@ func createBuiltWithSolveOpt(ctx context.Context, solveOpt client.SolveOpt, addr
 	if err != nil {
 		return diag.FromErr(err)
 	}
-	fmt.Sprintf("RESP %#v", resp)
+	fmt.Printf("RESP %#v", resp)
 	return nil
 }
