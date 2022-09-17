@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
+
 	"github.com/abergmeier/terraform-provider-buildkit/internal/provider"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/plugin"
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 )
 
 func main() {
-	plugin.Serve(&plugin.ServeOpts{
-		ProviderFunc: provider.Provider,
+	providerserver.Serve(context.Background(), provider.New, providerserver.ServeOpts{
+		Address: "hashicorp.com/abergmeier/buildkit",
 	})
 }

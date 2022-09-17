@@ -1,13 +1,47 @@
 package resources
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/hashicorp/go-cty/cty"
+	tresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/moby/buildkit/cmd/buildctl/build"
 )
+
+type builtResource struct {
+}
+
+func NewBuiltResource() tresource.Resource {
+	return &builtResource{}
+}
+
+func (r *builtResource) Metadata(context.Context, tresource.MetadataRequest, *tresource.MetadataResponse) {
+
+}
+
+func (r *builtResource) GetSchema(context.Context) (tfsdk.Schema, diag.Diagnostics) {
+
+}
+
+func (r *builtResource) Create(context.Context, tresource.CreateRequest, *tresource.CreateResponse) {
+
+}
+
+func (r *builtResource) Read(context.Context, tresource.ReadRequest, *tresource.ReadResponse) {
+
+}
+
+func (r *builtResource) Update(context.Context, tresource.UpdateRequest, *tresource.UpdateResponse) {
+
+}
+
+func (r *builtResource) Delete(context.Context, tresource.DeleteRequest, *tresource.DeleteResponse) {
+
+}
 
 func BuiltResource() *schema.Resource {
 	return &schema.Resource{

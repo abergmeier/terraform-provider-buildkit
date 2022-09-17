@@ -51,6 +51,19 @@ func readBuilt(context.Context, *schema.ResourceData, interface{}) diag.Diagnost
 }
 
 func createBuiltWithSolveOpt(ctx context.Context, solveOpt client.SolveOpt, addr string) diag.Diagnostics {
+
+	solveOpt := client.SolveOpt{
+		Exports: exports,
+		// LocalDirs is set later
+		Frontend: clicontext.String("frontend"),
+		// FrontendAttrs is set later
+		// OCILayouts is set later
+		CacheExports:        cacheExports,
+		CacheImports:        cacheImports,
+		Session:             attachable,
+		AllowedEntitlements: allowed,
+	}
+
 	c, err := client.New(ctx, addr)
 	if err != nil {
 		return diag.FromErr(err)
