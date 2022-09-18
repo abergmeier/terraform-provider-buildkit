@@ -4,8 +4,11 @@ import (
 	"context"
 	"flag"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/abergmeier/terraform-provider-buildkit/internal/resources"
+	"github.com/abergmeier/terraform-provider-buildkit/pkg/kubectl"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -97,28 +100,28 @@ type portForward struct {
 	}
 }
 
-type data struct {
-	addr          *string `tfsdk:"addr"`
+// arguments are the data that is used to configure the Provider
+type arguments struct {
+	Addr          *string `tfsdk:"addr"`
 	TlsServerName *string `tfsdk:"tlsservername"`
-	kubernetes    struct {
-		portForwards []portForward `tfsdk:"port_forwards"`
+	Kubernetes    *struct {
+		PortForwards []portForward `tfsdk:"port_forwards"`
 	} `tfsdk:"kubernetes"`
 }
 
 func (p *provider) GetSchema(context.Context) (tfsdk.Schema, diag.Diagnostics) {
-
 	return schema, nil
 }
 
 func (p *provider) Configure(ctx context.Context, req tprovider.ConfigureRequest, resp *tprovider.ConfigureResponse) {
-	d := data{}
-	diags := req.Config.Get(ctx, &d)
+	args := arguments{}
+	diags := req.Config.Get(ctx, &args)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	opts, diags := toValidatedForwardOptions(d.kubernetes.portForwards)
+	opts, diags := toValidatedForwardOptions(args.Kubernetes.PortForwards)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -135,11 +138,17 @@ func (p *provider) Configure(ctx context.Context, req tprovider.ConfigureRequest
 		}(horriblerangebehaviorofgo)
 	}
 
-	c, err := resolveClient(&d)
+	c, err := resolveClient(&args)
 	if err != nil {
 		resp.Diagnostics.AddError("Buildkit Client creation failed", err.Error())
 		return
 	}
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		defer c.Close()
+		_ = <-sigs
+	}()
 	resp.ResourceData = c
 }
 
@@ -162,16 +171,16 @@ func toValidatedForwardOptions(portForwards []portForward) ([]*portforward.PortF
 		kubeConfigFlags := defaultConfigFlags
 		matchVersionKubeConfigFlags := cmdutil.NewMatchVersionFlags(kubeConfigFlags)
 		f := cmdutil.NewFactory(matchVersionKubeConfigFlags)
-		o := newPortForwardOptions()
+		o := kubectl.NewPortForwardOptions()
 		if portForward.Service.name != "" {
-			err := completeService(f, o, portForward.Service.name, portForward.Service.ports)
+			err := kubectl.CompleteService(f, o, portForward.Service.name, portForward.Service.ports)
 			if err != nil {
 				return nil, diag.Diagnostics{
 					diag.NewAttributeErrorDiagnostic(p, "Preparing local Service port forwarding failed", err.Error()),
 				}
 			}
 		} else if portForward.Pod.name != "" {
-			err := completePod(f, o, portForward.Pod.name, portForward.Pod.ports)
+			err := kubectl.CompletePod(f, o, portForward.Pod.name, portForward.Pod.ports)
 			if err != nil {
 				return nil, diag.Diagnostics{
 					diag.NewAttributeErrorDiagnostic(p, "Preparing local Pod port forwarding failed", err.Error()),
@@ -195,10 +204,12 @@ func toValidatedForwardOptions(portForwards []portForward) ([]*portforward.PortF
 	return pfo, nil
 }
 
-func resolveClient(d *data) (*client.Client, error) {
+func resolveClient(d *arguments) (*client.Client, error) {
 
 	flagSet := flag.NewFlagSet("buildkit", flag.ContinueOnError)
+	flagSet.String("tlsservername", "", "")
+	flagSet.String("addr", "", "")
 	flagSet.Set("tlsservername", *d.TlsServerName)
-	flagSet.Set("addr", *d.addr)
+	flagSet.Set("addr", *d.Addr)
 	return bccommon.ResolveClient(cli.NewContext(nil, &flag.FlagSet{}, nil))
 }

@@ -3,13 +3,14 @@ package resources
 import (
 	"context"
 
+	"github.com/abergmeier/buildkit_ex/pkg/digest"
+	"github.com/abergmeier/terraform-provider-buildkit/pkg/buildctl"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	tresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-
-	"github.com/abergmeier/terraform-provider-buildkit/pkg/buildctl"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/cmd/buildctl/build"
 	"github.com/moby/buildkit/session"
@@ -131,17 +132,27 @@ func (r *builtResource) GetSchema(context.Context) (tfsdk.Schema, diag.Diagnosti
 	return builtSchema, nil
 }
 
-type builtConfig struct {
+type builtArguments struct {
 	Allow []string `tfsdk:"allow"`
 	Cache struct {
 		Disable       bool     `tfsdk:"disable"`
 		ExportStrings []string `tfsdk:"export_strings"`
 		ImportStrings []string `tfsdk:"import_strings"`
 	} `tfsdk:"cache"`
+	Frontend      string             `tfsdk:"frontend"`
 	Opts          map[string]string  `tfsdk:"opts"`
 	LocalDirs     map[string]string  `tfsdk:"local_dirs"`
+	MetadataFile  *string            `tfsdk:"metadata_file"`
 	OutputStrings []string           `tfsdk:"output_strings"`
 	Secrets       []secretAttachment `tfsdk:"secrets"`
+}
+
+type builtAttributes struct {
+	localDigest struct {
+		lastRead [64]byte
+		pushed   [64]byte
+	}
+	remoteDigest [64]byte
 }
 
 type secretAttachment struct {
@@ -159,41 +170,46 @@ func (r *builtResource) Create(ctx context.Context, req tresource.CreateRequest,
 		return
 	}
 
-	cfg := builtConfig{}
-	diags = req.Plan.Get(ctx, &cfg)
+	args := builtArguments{}
+	diags = req.Plan.Get(ctx, &args)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	ent, diags := parseAllow(cfg.Allow)
+	ent, diags := parseAllow(args.Allow)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	sa, diags := parseSecrets(cfg.Secrets)
+	sa, diags := parseSecrets(args.Secrets)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	exports, diags := parseOutput(cfg.OutputStrings)
+	exports, diags := parseOutput(args.OutputStrings)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	cacheExports, diags := parseExportCache(cfg.Cache.ExportStrings)
+	cacheExports, diags := parseExportCache(args.Cache.ExportStrings)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	cacheImports, diags := parseImportCache(cfg.Cache.ImportStrings)
+	cacheImports, diags := parseImportCache(args.Cache.ImportStrings)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+
+	metadataFile := ""
+	if args.MetadataFile != nil {
+		metadataFile = *args.MetadataFile
 	}
 
 	bc := buildctl.BuildConfig{
@@ -201,9 +217,12 @@ func (r *builtResource) Create(ctx context.Context, req tresource.CreateRequest,
 		SecretAttachables:   sa,
 		Exports:             exports,
 		ExportCaches:        cacheExports,
+		Frontend:            args.Frontend,
 		ImportCaches:        cacheImports,
-		FrontendAttrs:       parseOpts(cfg.Opts),
-		LocalDirs:           parseLocal(cfg.LocalDirs),
+		FrontendAttrs:       parseOpts(args.Opts),
+		LocalDirs:           parseLocal(args.LocalDirs),
+		MetadataFile:        metadataFile,
+		NoCache:             args.Cache.Disable,
 	}
 
 	err := buildctl.BuildAction(ctx, c, &bc)
@@ -213,12 +232,39 @@ func (r *builtResource) Create(ctx context.Context, req tresource.CreateRequest,
 	}
 }
 
-func (r *builtResource) Read(context.Context, tresource.ReadRequest, *tresource.ReadResponse) {
+func (r *builtResource) Read(ctx context.Context, req tresource.ReadRequest, resp *tresource.ReadResponse) {
 
+	args := builtArguments{}
+	diags := req.State.Get(ctx, &args)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	dockerfile := ""
+	switch args.Frontend {
+	case "dockerfile.v0":
+		//TODO: Implement finding the Dockerfile in args
+	default:
+		tflog.Warn(ctx, "Input caching not yet implemented", map[string]interface{}{
+			"frontend": args.Frontend,
+		})
+	}
+
+	if dockerfile != "" {
+		digest, err := digest.DigestOfFileAndAllInputs(dockerfile)
+		if err != nil {
+			tflog.Warn(ctx, "Calculating digest failed", map[string]interface{}{
+				"error": err.Error(),
+			})
+		}
+		_ = digest
+		// TODO: Update local digest
+	}
 }
 
-func (r *builtResource) Update(context.Context, tresource.UpdateRequest, *tresource.UpdateResponse) {
-
+func (r *builtResource) Update(ctx context.Context, req tresource.UpdateRequest, resp *tresource.UpdateResponse) {
+	// TODO; check wether local vs remote matches
 }
 
 func (r *builtResource) Delete(context.Context, tresource.DeleteRequest, *tresource.DeleteResponse) {
